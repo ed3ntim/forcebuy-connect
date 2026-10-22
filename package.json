@@ -1,0 +1,24 @@
+{
+  "name": "forcebuy-connect",
+  "version": "0.24.0",
+  "private": true,
+  "description": "Browser extension for ForceBuy: keeps your Steam access fresh. Read-only mirror.",
+  "author": "ed3n",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "node scripts/build-extension.mjs --target all",
+    "typecheck": "tsc --noEmit -p apps/extension",
+    "test": "vitest run --root apps/extension"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.3.6",
+    "@types/node": "^24.3.0",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4",
+    "esbuild": "^0.28.2"
+  }
+}

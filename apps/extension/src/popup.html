@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="color-scheme" content="light dark" />
+    <title>ForceBuy Connect</title>
+    <style>
+      :root { color-scheme: light dark; --bg: #ffffff; --fg: #1b1f24; --muted: #5b6573; --line: #d5dae1; --accent: #2563eb; --warn: #b45309; }
+      @media (prefers-color-scheme: dark) {
+        :root { --bg: #14171c; --fg: #e6e9ee; --muted: #9aa4b2; --line: #2c333d; --accent: #6ea0ff; --warn: #f0b35a; }
+      }
+      body { margin: 0; padding: 14px; width: 320px; background: var(--bg); color: var(--fg); font: 13px/1.45 system-ui, sans-serif; }
+      h1 { margin: 0 0 10px; font-size: 15px; }
+      p { margin: 0 0 10px; }
+      a { color: var(--accent); }
+      .muted { color: var(--muted); }
+      .warn { color: var(--warn); }
+      .row { padding: 6px 0; border-top: 1px solid var(--line); }
+      .actions { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+      button { padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--fg); font: inherit; cursor: pointer; }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      label { display: flex; gap: 6px; align-items: flex-start; color: var(--muted); }
+      [hidden] { display: none; }
+    </style>
+  </head>
+  <body>
+    <h1>ForceBuy Connect</h1>
+    <p id="notice" class="warn" hidden></p>
+    <div id="disconnected" hidden>
+      <p>
+        Not connected. Open ForceBuy (Inventories or Settings) and choose Connect extension.
+      </p>
+      <p><a href="https://forcebuy.net/settings" target="_blank" rel="noopener">Open ForceBuy settings</a></p>
+    </div>
+    <div id="connected" hidden>
+      <p id="account"></p>
+      <div class="row" id="renew"></div>
+      <div class="row" id="session"></div>
+      <div class="actions">
+        <button id="send" class="primary" type="button">Send now</button>
+        <label><input id="delete" type="checkbox" checked /> Also delete what it sent from ForceBuy</label>
+        <button id="disconnect" type="button">Disconnect</button>
+      </div>
+    </div>
+    <script src="popup.js"></script>
+  </body>
+</html>
