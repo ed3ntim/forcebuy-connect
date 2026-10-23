@@ -119,7 +119,18 @@ for (const target of TARGETS) {
   mkdirSync(out, { recursive: true });
 
   // background is a module worker in Chrome; content and popup are classic scripts.
-  const common = { bundle: true, platform: "browser", target: "es2022", logLevel: "warning", metafile: true, legalComments: "none" };
+  // absWorkingDir is fixed, so the bundle is the same byte for byte from any folder
+  // (pnpm --filter runs in apps/extension, the public mirror from its root): esbuild
+  // names the inputs in its path comments relative to it.
+  const common = {
+    bundle: true,
+    platform: "browser",
+    target: "es2022",
+    logLevel: "warning",
+    metafile: true,
+    legalComments: "none",
+    absWorkingDir: ROOT,
+  };
   const define = DEV
     ? {
         __FORCEBUY_BASE__: JSON.stringify(`http://127.0.0.1:${DEV_PORT}`),
