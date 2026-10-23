@@ -1,6 +1,6 @@
 {
   "name": "forcebuy-connect",
-  "version": "0.24.5",
+  "version": "0.24.6",
   "private": true,
   "description": "Browser extension for ForceBuy: keeps your Steam access fresh. Read-only mirror.",
   "author": "ed3n",

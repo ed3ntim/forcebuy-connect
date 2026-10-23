@@ -1,6 +1,6 @@
 import type { StatusReply } from "./background-logic";
 import { ext } from "./browser";
-import { RENEW_HINT, SESSION_HINT, describeDelivery, noticeFor } from "./popup-view";
+import { RENEW_HINT, describeDelivery, describeSession, noticeFor } from "./popup-view";
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
@@ -18,7 +18,7 @@ function render(status: StatusReply): void {
   const account = status.account;
   $("account").textContent = account ? `Connected to ForceBuy account ${account.personaName} (${account.steamId64})` : "Connected to ForceBuy";
   $("renew").textContent = describeDelivery("Renewal token", status.lastSent.renew, RENEW_HINT);
-  $("session").textContent = describeDelivery("Session", status.lastSent.session, SESSION_HINT);
+  $("session").textContent = describeSession(status.lastSent);
 }
 
 async function refresh(): Promise<void> {

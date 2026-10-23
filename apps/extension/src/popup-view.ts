@@ -9,6 +9,20 @@ export function describeDelivery(label: string, entry: Entry, hint: string): str
   return `${label}: sent ${new Date(entry.at).toLocaleString()} (${entry.code})`;
 }
 
+/** Renewal token codes that mean ForceBuy holds a working token. */
+const RENEW_IN_USE = new Set(["stored", "unchanged"]);
+
+/**
+ * The session line. The session is only read when no renewal token can be
+ * delivered, so a note from such a moment (signing out, a browser start before
+ * the cookies are loaded) goes stale once the token arrives: while the token is
+ * in use, the line says so instead of showing that old note.
+ */
+export function describeSession(lastSent: StatusReply["lastSent"]): string {
+  if (lastSent.renew && RENEW_IN_USE.has(lastSent.renew.code)) return "Session: not needed, the renewal token is in use";
+  return describeDelivery("Session", lastSent.session, SESSION_HINT);
+}
+
 export const RENEW_HINT = "sign in to Steam with Remember me";
 export const SESSION_HINT = "open Steam in this browser";
 
