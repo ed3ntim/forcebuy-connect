@@ -1,3 +1,4 @@
+import type { WatchedKind } from "./cookie-read";
 import type { Browser, Delivery } from "./delivery";
 import type { ExtState, LastSent } from "./state";
 
@@ -12,6 +13,7 @@ export type AlarmsApi = {
 export type BackgroundDeps = {
   delivery: Delivery;
   readState: () => Promise<ExtState>;
+  hasBuffPermission: () => Promise<boolean>;
   alarms: AlarmsApi;
   version: string;
   userAgent: string;
@@ -29,8 +31,12 @@ export type StatusReply = {
   linkId: string | null;
   account: ExtState["account"] | null;
   version: string;
-  lastSent: { renew?: Omit<LastSent, "sha256">; session?: Omit<LastSent, "sha256"> };
+  lastSent: { renew?: Omit<LastSent, "sha256">; session?: Omit<LastSent, "sha256">; buff?: Omit<LastSent, "sha256"> };
   updateNeeded: boolean;
+  /** ForceBuy has Buff163 turned on for this coupling. */
+  buffWanted: boolean;
+  /** The browser has allowed buff.163.com. */
+  buffPermission: boolean;
 };
 
 function withoutHash(entry: LastSent | undefined): Omit<LastSent, "sha256"> | undefined {
@@ -52,7 +58,7 @@ export function createBackground(deps: BackgroundDeps) {
   }
 
   /** A watched cookie got a new value: wait 5 s per kind, then deliver. The alarm covers a worker that ends first. */
-  function onCookie(kind: "renew" | "session"): void {
+  function onCookie(kind: WatchedKind): void {
     clearTimeout(timers.get(kind));
     void alarms.create("pending-change", { delayInMinutes: 1 });
     timers.set(
@@ -79,8 +85,14 @@ export function createBackground(deps: BackgroundDeps) {
       linkId: state.linkId ?? null,
       account: state.account ?? null,
       version: deps.version,
-      lastSent: { renew: withoutHash(state.lastSent?.renew), session: withoutHash(state.lastSent?.session) },
+      lastSent: {
+        renew: withoutHash(state.lastSent?.renew),
+        session: withoutHash(state.lastSent?.session),
+        buff: withoutHash(state.lastSent?.buff),
+      },
       updateNeeded: state.updateNeeded === true,
+      buffWanted: state.buffWanted === true,
+      buffPermission: await deps.hasBuffPermission(),
     };
   }
 
@@ -96,6 +108,8 @@ export function createBackground(deps: BackgroundDeps) {
       case "status":
         return status();
       case "send-now":
+        // Hello first: it brings the Buff163 switch of ForceBuy, which the user may have turned on a moment ago.
+        await delivery.hello(deps.version);
         await run("manual");
         return status();
       case "disconnect":

@@ -1,6 +1,7 @@
 import type { StatusReply } from "./background-logic";
 import { ext } from "./browser";
-import { RENEW_HINT, describeDelivery, describeSession, noticeFor } from "./popup-view";
+import { requestBuffPermission } from "./buff-permission";
+import { RENEW_HINT, describeBuff, describeDelivery, describeSession, noticeFor } from "./popup-view";
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
@@ -19,6 +20,9 @@ function render(status: StatusReply): void {
   $("account").textContent = account ? `Connected to ForceBuy account ${account.personaName} (${account.steamId64})` : "Connected to ForceBuy";
   $("renew").textContent = describeDelivery("Renewal token", status.lastSent.renew, RENEW_HINT);
   $("session").textContent = describeSession(status.lastSent);
+  const buff = describeBuff(status);
+  $("buff").textContent = buff.text;
+  $("allow-buff").hidden = !buff.allow;
 }
 
 async function refresh(): Promise<void> {
@@ -33,6 +37,12 @@ $("send").addEventListener("click", async () => {
   } finally {
     button.disabled = false;
   }
+});
+
+// The permission prompt needs the click itself, so nothing is awaited before it.
+$("allow-buff").addEventListener("click", async () => {
+  if (await requestBuffPermission()) render(await ask<StatusReply>({ type: "send-now" }));
+  else await refresh();
 });
 
 $("disconnect").addEventListener("click", async () => {

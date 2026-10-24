@@ -10,7 +10,9 @@ export type ExtState = {
   token?: string;
   linkId?: string;
   account?: PairedAccount;
-  lastSent?: { renew?: LastSent; session?: LastSent };
+  lastSent?: { renew?: LastSent; session?: LastSent; buff?: LastSent };
+  /** Whether ForceBuy has Buff163 turned on for this coupling (from hello); the browser permission is asked separately. */
+  buffWanted?: boolean;
   retries?: number;
   updateNeeded?: boolean;
 };

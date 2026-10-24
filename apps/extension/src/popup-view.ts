@@ -26,10 +26,23 @@ export function describeSession(lastSent: StatusReply["lastSent"]): string {
 export const RENEW_HINT = "sign in to Steam with Remember me";
 export const SESSION_HINT = "open Steam in this browser";
 
+export const BUFF_HINT = "sign in at buff.163.com";
+
+/**
+ * The Buff163 line, and whether the popup offers the button that asks the
+ * browser for access to buff.163.com. Off in ForceBuy comes first: nothing is
+ * read and nothing is asked until the user turned it on there.
+ */
+export function describeBuff(status: StatusReply): { text: string; allow: boolean } {
+  if (!status.buffWanted) return { text: "Buff163: off (turn it on in ForceBuy settings)", allow: false };
+  if (!status.buffPermission) return { text: "Buff163: turned on, but this browser has not allowed buff.163.com yet", allow: true };
+  return { text: describeDelivery("Buff163", status.lastSent.buff, BUFF_HINT), allow: false };
+}
+
 /** The warning shown above everything else, or null. */
 export function noticeFor(status: StatusReply): string | null {
   if (status.updateNeeded) return "Update the extension";
-  const codes = [status.lastSent.renew?.code, status.lastSent.session?.code];
+  const codes = [status.lastSent.renew?.code, status.lastSent.session?.code, status.lastSent.buff?.code];
   if (codes.includes("consent_outdated")) return "Open ForceBuy to confirm the new notice";
   return null;
 }

@@ -19,15 +19,24 @@ const session = (ms = 20 * 60 * 60 * 1000) => cookie("web", ms);
 
 type Reply = { status: number; data: unknown } | Error;
 
-function setup(opts: { renew?: string | null; session?: string | null; replies?: Reply[]; state?: ExtState }) {
+function setup(opts: {
+  renew?: string | null;
+  session?: string | null;
+  buff?: string | null;
+  permission?: boolean;
+  replies?: Reply[];
+  state?: ExtState;
+}) {
   let state: ExtState = { token: "tok", linkId: "l1", ...opts.state };
   const posts: Array<{ path: string; body: unknown; token?: string }> = [];
   const replies = [...(opts.replies ?? [])];
-  const cookies = { renew: opts.renew === undefined ? renew() : opts.renew, session: opts.session === undefined ? null : opts.session };
+  const cookies = { renew: opts.renew === undefined ? renew() : opts.renew, session: opts.session === undefined ? null : opts.session, buff: opts.buff === undefined ? null : opts.buff };
   const read = (value: string | null) => (value ? { value } : { missing: "not_found" as const });
   const deps: Deps = {
     readRenewToken: async () => read(cookies.renew),
     readSession: async () => read(cookies.session),
+    readBuffSession: async () => read(cookies.buff),
+    hasBuffPermission: async () => opts.permission ?? true,
     post: (async (path: string, body: unknown, token?: string) => {
       posts.push({ path, body, token });
       const next = replies.shift() ?? { status: 200, data: { result: "stored" } };
@@ -203,5 +212,127 @@ describe("pair, hello, disconnect", () => {
     expect(await t.delivery.disconnect("delete")).toEqual({ ok: true, serverReached: false });
     expect(t.getState()).toEqual({});
     expect(t.posts[0]).toMatchObject({ path: "/api/ext/disconnect", body: { tokens: "delete" } });
+  });
+});
+
+describe("the Buff163 cookie", () => {
+  const BUFF = "1-abcDEF123_xyz";
+  const buffPosts = (t: ReturnType<typeof setup>) => t.posts.filter((post) => post.path === "/api/ext/buff-session");
+
+  it("is sent after Steam, on its own, with the bare value", async () => {
+    const t = setup({ buff: BUFF, state: { buffWanted: true } });
+    await t.delivery.deliverAll("a");
+    expect(t.posts.map((post) => post.path)).toEqual(["/api/ext/steam-renew", "/api/ext/buff-session"]);
+    expect(t.posts[1]).toMatchObject({ body: { value: BUFF }, token: "tok" });
+    expect(t.getState().lastSent?.buff).toMatchObject({ code: "stored", steamId: "" });
+    // The same value is not sent twice.
+    await t.delivery.deliverAll("b");
+    expect(buffPosts(t)).toHaveLength(1);
+  });
+
+  it("is sent even when no Steam cookie is in the browser", async () => {
+    const t = setup({ renew: null, session: null, buff: BUFF, state: { buffWanted: true } });
+    await t.delivery.deliverAll("a");
+    expect(t.posts.map((post) => post.path)).toEqual(["/api/ext/buff-session"]);
+  });
+
+  it("is not read or sent while ForceBuy has it off or the browser has not allowed the host", async () => {
+    for (const setupOpts of [{ state: { buffWanted: false } }, { state: {} }, { permission: false, state: { buffWanted: true } }]) {
+      const t = setup({ buff: BUFF, ...setupOpts });
+      await t.delivery.deliverAll("a");
+      expect(buffPosts(t)).toHaveLength(0);
+      expect(t.getState().lastSent?.buff).toBeUndefined();
+    }
+  });
+
+  it("notes a missing cookie without sending", async () => {
+    const t = setup({ buff: null, state: { buffWanted: true } });
+    await t.delivery.deliverAll("a");
+    expect(buffPosts(t)).toHaveLength(0);
+    expect(t.getState().lastSent?.buff?.code).toBe("missing");
+  });
+
+  it("refuses locally what is not the bare value of one cookie", async () => {
+    for (const value of ["session=abc", "a; b", "a b", "x".repeat(4097)]) {
+      const t = setup({ buff: value, state: { buffWanted: true } });
+      await t.delivery.deliverAll("a");
+      expect(buffPosts(t)).toHaveLength(0);
+      expect(t.getState().lastSent?.buff?.code).toBe("buff_cookie_invalid");
+    }
+  });
+
+  it("does not let a Steam failure stop it, nor a Buff failure stop Steam", async () => {
+    const a = setup({ buff: BUFF, replies: [err(409, "busy"), ok], state: { buffWanted: true } });
+    expect(await a.delivery.deliverAll("a")).toEqual({ retry: true });
+    expect(a.getState().lastSent?.buff?.code).toBe("stored");
+
+    const b = setup({ buff: BUFF, replies: [ok, err(409, "busy")], state: { buffWanted: true } });
+    expect(await b.delivery.deliverAll("a")).toEqual({ retry: true });
+    expect(b.getState().lastSent?.renew?.code).toBe("stored");
+    expect(b.getState().retries).toBe(1);
+  });
+
+  it("asks for a retry when Buff says busy or is unreachable", async () => {
+    for (const reply of [err(409, "busy"), new Error("offline")]) {
+      const t = setup({ renew: null, buff: BUFF, replies: [reply], state: { buffWanted: true } });
+      expect(await t.delivery.deliverAll("a")).toEqual({ retry: true });
+    }
+  });
+
+  it("stops asking when ForceBuy says it is not turned on, and delivers anew once it is", async () => {
+    const t = setup({ renew: null, buff: BUFF, replies: [ok, err(409, "buff_not_enabled"), ok], state: { buffWanted: true } });
+    await t.delivery.deliverAll("a");
+    expect(t.getState().lastSent?.buff?.sha256).not.toBe("");
+    // Changed cookie: sent again, and refused as switched off.
+    t.cookies.buff = BUFF + "2";
+    expect(await t.delivery.deliverAll("b")).toEqual({ retry: false });
+    expect(t.getState()).toMatchObject({ buffWanted: false, lastSent: { buff: { code: "buff_not_enabled", sha256: "" } } });
+    // No more attempts while it is off.
+    await t.delivery.deliverAll("c");
+    expect(buffPosts(t)).toHaveLength(2);
+    // Turned on again: the hash is gone, so the same cookie goes out again.
+    await t.delivery.deliver("buff", "d");
+    expect(buffPosts(t)).toHaveLength(3);
+  });
+
+  it("does not retry consent_outdated and keeps the code", async () => {
+    const t = setup({ renew: null, buff: BUFF, replies: [err(409, "consent_outdated")], state: { buffWanted: true } });
+    expect(await t.delivery.deliverAll("a")).toEqual({ retry: false });
+    expect(t.getState().lastSent?.buff?.code).toBe("consent_outdated");
+  });
+
+  it("does not retry a login Buff refused, but sends a changed cookie", async () => {
+    const t = setup({ renew: null, buff: BUFF, replies: [err(400, "buff_login_required"), ok], state: { buffWanted: true } });
+    expect(await t.delivery.deliverAll("a")).toEqual({ retry: false });
+    expect(t.getState().lastSent?.buff?.code).toBe("buff_login_required");
+    t.cookies.buff = BUFF + "2";
+    await t.delivery.deliverAll("b");
+    expect(t.getState().lastSent?.buff?.code).toBe("stored");
+  });
+
+  it("clears the state on a revoked coupling", async () => {
+    const t = setup({ renew: null, buff: BUFF, replies: [err(401, "ext_token_revoked")], state: { buffWanted: true } });
+    expect(await t.delivery.deliverAll("a")).toEqual({ retry: false, disconnected: true });
+    expect(t.getState()).toEqual({});
+  });
+
+  it("learns the switch from hello, and forgets the delivery when it is off", async () => {
+    const t = setup({
+      buff: BUFF,
+      replies: [{ status: 200, data: { ok: true, buff: true } }, ok, { status: 200, data: { ok: true, buff: false } }],
+    });
+    await t.delivery.hello("1");
+    expect(t.getState().buffWanted).toBe(true);
+    await t.delivery.deliver("buff", "a");
+    expect(t.getState().lastSent?.buff?.sha256).not.toBe("");
+    await t.delivery.hello("1");
+    expect(t.getState().buffWanted).toBe(false);
+    expect(t.getState().lastSent?.buff).toBeUndefined();
+  });
+
+  it("never keeps the cookie value in the state", async () => {
+    const t = setup({ buff: BUFF, state: { buffWanted: true } });
+    await t.delivery.deliverAll("a");
+    expect(JSON.stringify(t.getState())).not.toContain(BUFF);
   });
 });

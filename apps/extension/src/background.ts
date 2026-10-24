@@ -1,7 +1,8 @@
 // Service worker (Chrome/Edge) / event page (Firefox). Listeners are registered synchronously at load.
 import { ext } from "./browser";
 import { createBackground } from "./background-logic";
-import { onWatchedCookie, readRenewToken, readSession } from "./cookie-read";
+import { hasBuffPermission } from "./buff-permission";
+import { onWatchedCookie, readBuffSession, readRenewToken, readSession } from "./cookie-read";
 import { createDelivery } from "./delivery";
 import { post } from "./forcebuy-api";
 import { sha256Hex } from "./hash";
@@ -11,6 +12,8 @@ const manifest = ext.runtime.getManifest();
 const delivery = createDelivery({
   readRenewToken,
   readSession,
+  readBuffSession,
+  hasBuffPermission,
   post,
   readState,
   writeState,
@@ -21,6 +24,7 @@ const delivery = createDelivery({
 const background = createBackground({
   delivery,
   readState,
+  hasBuffPermission,
   alarms: {
     create: (name, info) => ext.alarms.create(name, info as chrome.alarms.AlarmCreateInfo),
     get: (name) => ext.alarms.get(name),

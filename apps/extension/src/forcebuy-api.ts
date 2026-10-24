@@ -11,6 +11,7 @@ export type ApiPath =
   | "/api/ext/hello"
   | "/api/ext/steam-renew"
   | "/api/ext/steam-session"
+  | "/api/ext/buff-session"
   | "/api/ext/disconnect";
 
 export async function post<T>(path: ApiPath, body: unknown, token?: string): Promise<{ status: number; data: T | null }> {

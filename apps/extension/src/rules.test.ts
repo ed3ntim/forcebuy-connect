@@ -35,6 +35,10 @@ describe("extension source rules", () => {
     expect(filesMatching(/\bcookies\.\w/)).toEqual(["cookie-read.ts"]);
   });
 
+  it("touches the permissions API only in buff-permission.ts", () => {
+    expect(filesMatching(/\bpermissions\.\w/)).toEqual(["buff-permission.ts"]);
+  });
+
   it("never sets, removes or lists cookies", () => {
     expect(filesMatching(/\bcookies\.(set|remove|getAll|getAllCookieStores)\b/)).toEqual([]);
   });
@@ -57,6 +61,7 @@ describe("extension source rules", () => {
     const manifest = JSON.parse(readFileSync(fileURLToPath(new URL("../manifest.base.json", import.meta.url)), "utf8")) as {
       permissions: string[];
       host_permissions: string[];
+      optional_host_permissions?: string[];
       content_scripts: Array<{ matches: string[] }>;
       externally_connectable?: unknown;
     };
@@ -68,6 +73,13 @@ describe("extension source rules", () => {
         "https://steamcommunity.com/*",
         "https://forcebuy.net/*",
       ]);
+    });
+
+    // A required new host would switch existing installations off until the user accepts it.
+    it("asks for buff.163.com only as an optional host", () => {
+      expect(manifest.optional_host_permissions).toEqual(["https://buff.163.com/*"]);
+      expect(manifest.host_permissions.join(" ")).not.toContain("163.com");
+      expect(manifest.permissions).not.toContain("permissions");
     });
 
     it("asks for none of the broad permissions", () => {

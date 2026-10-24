@@ -3,7 +3,7 @@ import type { CookieRead } from "./cookie-read";
 import type { ApiPath } from "./forcebuy-api";
 import type { ExtState, LastSent, PairedAccount } from "./state";
 
-export type Kind = "renew" | "session";
+export type Kind = "renew" | "session" | "buff";
 export type Browser = "chrome" | "edge" | "firefox" | "other";
 
 /** Attempts per delivery chain (first try included) before the extension waits for the next trigger. */
@@ -13,10 +13,20 @@ export const SESSION_MIN_LEFT_MS = 2 * 60 * 60 * 1000;
 const PROTO = 1;
 /** Server answers that mean the value is stored or needs no storing. */
 const DONE = new Set(["stored", "unchanged", "no_inventory", "not_needed"]);
+/** The Buff163 cookie is the bare value of one cookie: no leading `session=`, no `;`, no whitespace (`=` may be in it). The server checks the same. */
+const BUFF_VALUE = /^(?!session=)[^\s;]{1,4096}$/;
+const PATHS: Record<Kind, ApiPath> = {
+  renew: "/api/ext/steam-renew",
+  session: "/api/ext/steam-session",
+  buff: "/api/ext/buff-session",
+};
 
 export type Deps = {
   readRenewToken: () => Promise<CookieRead>;
   readSession: () => Promise<CookieRead>;
+  readBuffSession: () => Promise<CookieRead>;
+  /** Whether the browser has allowed buff.163.com (an optional host). */
+  hasBuffPermission: () => Promise<boolean>;
   post: <T>(path: ApiPath, body: unknown, token?: string) => Promise<{ status: number; data: T | null }>;
   readState: () => Promise<ExtState>;
   writeState: (patch: Partial<ExtState>) => Promise<void>;
@@ -49,6 +59,7 @@ export function createDelivery(deps: Deps) {
 
   /** Local check before anything leaves the browser: an error code, or null when the value may be sent. */
   function localError(kind: Kind, value: string): string | null {
+    if (kind === "buff") return BUFF_VALUE.test(value) ? null : "buff_cookie_invalid";
     if (kind === "renew") {
       const checked = checkRenewToken(value, steamIdFromCookie(value) ?? "", deps.now());
       return checked.ok ? null : checked.error;
@@ -63,7 +74,7 @@ export function createDelivery(deps: Deps) {
     const state = await deps.readState();
     if (!state.token) return { status: "disconnected", code: "not_paired" };
 
-    const read = await (kind === "renew" ? deps.readRenewToken() : deps.readSession());
+    const read = await (kind === "renew" ? deps.readRenewToken() : kind === "session" ? deps.readSession() : deps.readBuffSession());
     if (!("value" in read)) {
       await note(kind, { code: "missing" });
       return { status: "missing", code: "missing" };
@@ -79,10 +90,10 @@ export function createDelivery(deps: Deps) {
     const prev = state.lastSent?.[kind];
     if (prev && prev.sha256 === sha256 && DONE.has(prev.code)) return { status: "skipped", code: prev.code };
 
-    const steamId = steamIdFromCookie(value) ?? "";
+    const steamId = kind === "buff" ? "" : (steamIdFromCookie(value) ?? "");
     let response: { status: number; data: unknown };
     try {
-      response = await deps.post(kind === "renew" ? "/api/ext/steam-renew" : "/api/ext/steam-session", { value }, state.token);
+      response = await deps.post(PATHS[kind], { value }, state.token);
     } catch {
       await note(kind, { code: "network" });
       return { status: "retry", code: "network" };
@@ -99,6 +110,12 @@ export function createDelivery(deps: Deps) {
       await deps.clearState();
       return { status: "disconnected", code: errorCode };
     }
+    if (kind === "buff" && status === 409 && errorCode === "buff_not_enabled") {
+      // Turned off in ForceBuy: stop trying, forget the hash so that turning it on again delivers the cookie anew.
+      await deps.writeState({ buffWanted: false });
+      await note(kind, { code: errorCode, sha256: "" });
+      return { status: "rejected", code: errorCode };
+    }
     await note(kind, { code: errorCode });
     if (status === 409 && errorCode === "consent_outdated") return { status: "consent", code: errorCode };
     if (status === 409 || status === 429 || status >= 500) return { status: "retry", code: errorCode };
@@ -109,12 +126,23 @@ export function createDelivery(deps: Deps) {
     outcome.status === "missing" ||
     (outcome.status === "rejected" && (outcome.code.startsWith("renew_token_") || outcome.code === "renew_session_invalid"));
 
-  /** Renewal token first; the session only when that cannot be delivered. `retry` asks for a new attempt later. */
+  /**
+   * Renewal token first; the session only when that cannot be delivered. Then,
+   * on its own and whatever Steam said, the Buff163 cookie when ForceBuy has it
+   * turned on and the browser allowed buff.163.com. `retry` asks for a new
+   * attempt later.
+   */
   async function deliverAll(reason: string): Promise<{ retry: boolean; disconnected?: boolean }> {
     let outcome = await deliver("renew", reason);
     if (renewFailed(outcome)) outcome = await deliver("session", reason);
     if (outcome.status === "disconnected") return { retry: false, disconnected: true };
-    if (outcome.status === "retry") {
+    let retryWanted = outcome.status === "retry";
+    if ((await deps.readState()).buffWanted && (await deps.hasBuffPermission())) {
+      const buff = await deliver("buff", reason);
+      if (buff.status === "disconnected") return { retry: false, disconnected: true };
+      if (buff.status === "retry") retryWanted = true;
+    }
+    if (retryWanted) {
       const attempts = ((await deps.readState()).retries ?? 0) + 1;
       if (attempts < MAX_ATTEMPTS) {
         await deps.writeState({ retries: attempts });
@@ -164,10 +192,18 @@ export function createDelivery(deps: Deps) {
     const state = await deps.readState();
     if (!state.token) return;
     try {
-      const { status } = await deps.post("/api/ext/hello", { extVersion: version, proto: PROTO }, state.token);
+      const { status, data } = await deps.post("/api/ext/hello", { extVersion: version, proto: PROTO }, state.token);
       if (status === 401) await deps.clearState();
       else if (status === 426) await deps.writeState({ updateNeeded: true });
-      else if (status === 200) await deps.writeState({ updateNeeded: false });
+      else if (status === 200) {
+        const buffWanted = (data as { buff?: boolean } | null)?.buff === true;
+        await deps.writeState({ updateNeeded: false, buffWanted });
+        // Off in ForceBuy: what was delivered may be gone from there, so the next turn-on must deliver again.
+        if (!buffWanted && state.lastSent?.buff) {
+          const { buff: _gone, ...rest } = state.lastSent;
+          await deps.writeState({ lastSent: rest });
+        }
+      }
     } catch {
       // Offline: the next daily hello tries again.
     }
