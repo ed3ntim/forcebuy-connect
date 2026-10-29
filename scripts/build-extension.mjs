@@ -82,7 +82,18 @@ function manifestFor(target) {
     manifest.background = { service_worker: "background.js", type: "module" };
   } else {
     manifest.background = { scripts: ["background.js"] };
-    manifest.browser_specific_settings = { gecko: { id: "connect@forcebuy.net", strict_min_version: "128.0" } };
+    // Firefox knows no version_name and warns about it on addons.mozilla.org.
+    delete manifest.version_name;
+    // AMO requires data_collection_permissions for every new extension since
+    // 2025-11-03: the sign-in cookies are authentication info sent to forcebuy.net.
+    // Firefox asks for that consent itself from 140 on, hence the minimum.
+    manifest.browser_specific_settings = {
+      gecko: {
+        id: "connect@forcebuy.net",
+        strict_min_version: "140.0",
+        data_collection_permissions: { required: ["authenticationInfo"] },
+      },
+    };
   }
   return manifest;
 }
