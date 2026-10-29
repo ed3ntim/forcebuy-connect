@@ -8,7 +8,7 @@ for your Buff163 sign-in.
 Install it from the
 [Chrome Web Store](https://chromewebstore.google.com/detail/aopdpdengffimalmmfmolfceglbnecge)
 (Chrome and Edge) or from
-[Firefox Add-ons](https://addons.mozilla.org/firefox/addon/connect@forcebuy.net/).
+[Firefox Add-ons](https://addons.mozilla.org/firefox/addon/forcebuy-connect/).
 
 This repository is a read-only mirror. It is generated from the ForceBuy
 source on every release and holds exactly the code that goes into the store
