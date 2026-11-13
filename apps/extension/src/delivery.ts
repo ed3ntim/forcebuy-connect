@@ -1,6 +1,6 @@
 import { checkRenewToken, jwtClaims, steamIdFromCookie } from "../../../packages/shared/src/steam-cookie";
 import type { CookieRead } from "./cookie-read";
-import type { ApiPath } from "./forcebuy-api";
+import type { ApiPath, PostResult } from "./forcebuy-api";
 import type { ExtState, LastSent, PairedAccount } from "./state";
 
 export type Kind = "renew" | "session" | "buff";
@@ -27,7 +27,7 @@ export type Deps = {
   readBuffSession: () => Promise<CookieRead>;
   /** Whether the browser has allowed buff.163.com (an optional host). */
   hasBuffPermission: () => Promise<boolean>;
-  post: <T>(path: ApiPath, body: unknown, token?: string) => Promise<{ status: number; data: T | null }>;
+  post: <T>(path: ApiPath, body: unknown, token?: string) => Promise<PostResult<T>>;
   readState: () => Promise<ExtState>;
   writeState: (patch: Partial<ExtState>) => Promise<void>;
   clearState: () => Promise<void>;
@@ -38,6 +38,8 @@ export type Deps = {
 export type Outcome = {
   status: "done" | "skipped" | "missing" | "rejected" | "consent" | "retry" | "disconnected";
   code: string;
+  /** Seconds the server asked to wait (`Retry-After`), with a `retry`. */
+  retryAfterSec?: number;
 };
 
 type ErrorBody = { error?: string };
@@ -91,7 +93,7 @@ export function createDelivery(deps: Deps) {
     if (prev && prev.sha256 === sha256 && DONE.has(prev.code)) return { status: "skipped", code: prev.code };
 
     const steamId = kind === "buff" ? "" : (steamIdFromCookie(value) ?? "");
-    let response: { status: number; data: unknown };
+    let response: PostResult<unknown>;
     try {
       response = await deps.post(PATHS[kind], { value }, state.token);
     } catch {
@@ -118,7 +120,10 @@ export function createDelivery(deps: Deps) {
     }
     await note(kind, { code: errorCode });
     if (status === 409 && errorCode === "consent_outdated") return { status: "consent", code: errorCode };
-    if (status === 409 || status === 429 || status >= 500) return { status: "retry", code: errorCode };
+    if (status === 409 || status === 429 || status >= 500) {
+      // 503 with Retry-After: a transient failure on Steam's side, the server says when it is worth asking again.
+      return response.retryAfterSec ? { status: "retry", code: errorCode, retryAfterSec: response.retryAfterSec } : { status: "retry", code: errorCode };
+    }
     return { status: "rejected", code: errorCode };
   }
 
@@ -132,21 +137,25 @@ export function createDelivery(deps: Deps) {
    * turned on and the browser allowed buff.163.com. `retry` asks for a new
    * attempt later.
    */
-  async function deliverAll(reason: string): Promise<{ retry: boolean; disconnected?: boolean }> {
+  async function deliverAll(reason: string): Promise<{ retry: boolean; retryAfterSec?: number; disconnected?: boolean }> {
     let outcome = await deliver("renew", reason);
     if (renewFailed(outcome)) outcome = await deliver("session", reason);
     if (outcome.status === "disconnected") return { retry: false, disconnected: true };
     let retryWanted = outcome.status === "retry";
+    let waitSec = outcome.status === "retry" ? (outcome.retryAfterSec ?? 0) : 0;
     if ((await deps.readState()).buffWanted && (await deps.hasBuffPermission())) {
       const buff = await deliver("buff", reason);
       if (buff.status === "disconnected") return { retry: false, disconnected: true };
-      if (buff.status === "retry") retryWanted = true;
+      if (buff.status === "retry") {
+        retryWanted = true;
+        waitSec = Math.max(waitSec, buff.retryAfterSec ?? 0);
+      }
     }
     if (retryWanted) {
       const attempts = ((await deps.readState()).retries ?? 0) + 1;
       if (attempts < MAX_ATTEMPTS) {
         await deps.writeState({ retries: attempts });
-        return { retry: true };
+        return waitSec ? { retry: true, retryAfterSec: waitSec } : { retry: true };
       }
     }
     await deps.writeState({ retries: 0 });
@@ -157,7 +166,7 @@ export function createDelivery(deps: Deps) {
     code: string,
     browser: Browser,
     version: string,
-  ): Promise<{ ok: true; account: PairedAccount; retry: boolean } | { ok: false; error: string }> {
+  ): Promise<{ ok: true; account: PairedAccount; retry: boolean; retryAfterSec?: number } | { ok: false; error: string }> {
     let response: { status: number; data: unknown };
     try {
       response = await deps.post("/api/ext/pair", { code, browser, extVersion: version, proto: PROTO });
@@ -185,7 +194,12 @@ export function createDelivery(deps: Deps) {
     await deps.clearState();
     await deps.writeState({ token: data.token, linkId: data.linkId, account: data.account, lastSent: {}, retries: 0 });
     const result = await deliverAll("paired");
-    return { ok: true, account: data.account, retry: result.retry };
+    return {
+      ok: true,
+      account: data.account,
+      retry: result.retry,
+      ...(result.retryAfterSec ? { retryAfterSec: result.retryAfterSec } : {}),
+    };
   }
 
   async function hello(version: string): Promise<void> {

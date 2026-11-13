@@ -139,6 +139,13 @@ describe("deliver", () => {
     }
   });
 
+  it("retries a transient Steam failure (503) and passes on the Retry-After", async () => {
+    const t = setup({ replies: [{ status: 503, data: { error: "renew_unreachable" }, retryAfterSec: 900 } as Reply] });
+    expect(await t.delivery.deliverAll("a")).toEqual({ retry: true, retryAfterSec: 900 });
+    expect(t.getState().lastSent?.renew?.code).toBe("renew_unreachable");
+    expect(t.getState().retries).toBe(1);
+  });
+
   it("gives up after 6 attempts and starts over later", async () => {
     const t = setup({ replies: Array.from({ length: 12 }, () => err(409, "busy")) });
     for (let i = 1; i < MAX_ATTEMPTS; i++) expect(await t.delivery.deliverAll("r")).toEqual({ retry: true });

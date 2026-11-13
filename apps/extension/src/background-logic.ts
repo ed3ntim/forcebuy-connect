@@ -4,6 +4,14 @@ import type { ExtState, LastSent } from "./state";
 
 export const DEBOUNCE_MS = 5000;
 const RETRY_MINUTES = 5;
+/** The longest wait a `Retry-After` may ask for: a day-long wait would only leave the coupling idle. */
+const RETRY_MAX_MINUTES = 60;
+
+/** Minutes until the next attempt: the default, or what the server asked for, within bounds. */
+export function retryDelayMinutes(retryAfterSec?: number): number {
+  if (!retryAfterSec) return RETRY_MINUTES;
+  return Math.min(RETRY_MAX_MINUTES, Math.max(RETRY_MINUTES, Math.ceil(retryAfterSec / 60)));
+}
 
 export type AlarmsApi = {
   create: (name: string, info: { delayInMinutes?: number; periodInMinutes?: number }) => void | Promise<void>;
@@ -50,7 +58,7 @@ export function createBackground(deps: BackgroundDeps) {
   /** Delivers and asks for a retry alarm when the chain wants one. */
   async function run(reason: string): Promise<void> {
     const result = await delivery.deliverAll(reason);
-    if (result.retry) await alarms.create("retry-delivery", { delayInMinutes: RETRY_MINUTES });
+    if (result.retry) await alarms.create("retry-delivery", { delayInMinutes: retryDelayMinutes(result.retryAfterSec) });
   }
 
   async function ensureDailyAlarm(): Promise<void> {
@@ -102,7 +110,9 @@ export function createBackground(deps: BackgroundDeps) {
       case "pair": {
         if (typeof msg.code !== "string" || !msg.code || msg.code.length > 200) return { ok: false, error: "invalid_request" };
         const result = await delivery.pair(msg.code, detectBrowser(deps.userAgent), deps.version);
-        if (result.ok && result.retry) await alarms.create("retry-delivery", { delayInMinutes: RETRY_MINUTES });
+        if (result.ok && result.retry) {
+          await alarms.create("retry-delivery", { delayInMinutes: retryDelayMinutes(result.retryAfterSec) });
+        }
         return result.ok ? { ok: true, account: result.account } : result;
       }
       case "status":

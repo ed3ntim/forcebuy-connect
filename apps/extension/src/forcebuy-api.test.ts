@@ -29,6 +29,13 @@ describe("post", () => {
     expect(init.headers).toEqual({ "Content-Type": "application/json", Authorization: "Bearer tok" });
   });
 
+  it("passes on a Retry-After in seconds, and only then", async () => {
+    stub(new Response("{}", { status: 503, headers: { "Retry-After": "900" } }));
+    expect(await post("/api/ext/steam-renew", {})).toEqual({ status: 503, data: {}, retryAfterSec: 900 });
+    stub(new Response("{}", { status: 503, headers: { "Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT" } }));
+    expect(await post("/api/ext/steam-renew", {})).toEqual({ status: 503, data: {} });
+  });
+
   it("returns null data when the body is not JSON", async () => {
     stub(new Response("nope", { status: 502 }));
     expect(await post("/api/ext/pair", {})).toEqual({ status: 502, data: null });

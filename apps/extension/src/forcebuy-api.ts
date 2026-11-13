@@ -14,7 +14,10 @@ export type ApiPath =
   | "/api/ext/buff-session"
   | "/api/ext/disconnect";
 
-export async function post<T>(path: ApiPath, body: unknown, token?: string): Promise<{ status: number; data: T | null }> {
+/** What the server answered; `retryAfterSec` only when it sent a `Retry-After` in seconds. */
+export type PostResult<T> = { status: number; data: T | null; retryAfterSec?: number };
+
+export async function post<T>(path: ApiPath, body: unknown, token?: string): Promise<PostResult<T>> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
   const response = await fetch(`${BASE}${path}`, {
@@ -29,5 +32,6 @@ export async function post<T>(path: ApiPath, body: unknown, token?: string): Pro
   } catch {
     data = null;
   }
-  return { status: response.status, data };
+  const wait = Number(response.headers.get("Retry-After"));
+  return Number.isFinite(wait) && wait > 0 ? { status: response.status, data, retryAfterSec: wait } : { status: response.status, data };
 }

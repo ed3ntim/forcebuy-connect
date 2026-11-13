@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createBackground, detectBrowser } from "./background-logic";
+import { createBackground, detectBrowser, retryDelayMinutes } from "./background-logic";
 import type { Delivery } from "./delivery";
 import type { ExtState } from "./state";
 
@@ -121,6 +121,14 @@ describe("messages and alarms", () => {
     deliverAll.mockResolvedValue({ retry: true });
     await background.handle({ type: "send-now" });
     expect(alarms.create).toHaveBeenCalledWith("retry-delivery", { delayInMinutes: 5 });
+  });
+
+  it("waits as long as the server asked, within bounds", async () => {
+    const { background, deliverAll, alarms } = setup();
+    deliverAll.mockResolvedValue({ retry: true, retryAfterSec: 900 });
+    await background.handle({ type: "send-now" });
+    expect(alarms.create).toHaveBeenCalledWith("retry-delivery", { delayInMinutes: 15 });
+    expect([retryDelayMinutes(undefined), retryDelayMinutes(30), retryDelayMinutes(999999)]).toEqual([5, 5, 60]);
   });
 
   it("detects Edge and Firefox", () => {

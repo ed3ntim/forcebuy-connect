@@ -1,12 +1,62 @@
+import { isDeliveryCode, type DeliveryCode } from "../../../packages/shared/src/extension-delivery";
 import type { StatusReply } from "./background-logic";
 
 type Entry = StatusReply["lastSent"]["renew"];
+
+const TRANSIENT = "Steam could not be reached for the renewal, will try later";
+
+/** What each code ForceBuy answers means, in a sentence; the transient Steam failures share one (same wording as the web app). */
+export const DELIVERY_TEXT: Record<DeliveryCode, string> = {
+  stored: "stored in ForceBuy",
+  unchanged: "already up to date",
+  not_needed: "not needed, renewal is working",
+  no_inventory: "no inventory for that Steam account",
+  busy: "ForceBuy is busy, will retry",
+  consent_outdated: "connect again to confirm the new notice",
+  credentials_unavailable: "the server cannot store logins right now",
+  inventory_not_found: "that inventory no longer exists",
+  renew_token_missing: "no renewal token in the browser",
+  renew_token_is_session: "that is a session, not a renewal token",
+  renew_token_wrong_account: "the token belongs to another Steam account",
+  renew_token_expired: "the token had already expired",
+  renew_token_expires_soon: "the token runs out in less than three days",
+  renew_token_rejected: "Steam does not accept the token",
+  renew_session_invalid: "Steam handed out a session that does not work",
+  renew_unavailable: TRANSIENT,
+  renew_unreachable: TRANSIENT,
+  renew_unexpected_response: TRANSIENT,
+  renew_no_session: TRANSIENT,
+  renew_session_expired: TRANSIENT,
+  renew_rate_limited: TRANSIENT,
+  steam_cookie_missing: "no session in the browser",
+  steam_cookie_wrong_account: "the session belongs to another Steam account",
+  steam_session_expired: "the session had already expired",
+  buff_not_enabled: "Buff163 is switched off in ForceBuy",
+  buff_cookie_invalid: "the Buff163 cookie has an unexpected form",
+  buff_login_required: "Buff163 does not accept the login, sign in there again",
+  access_failed: "failed, the server could not use it",
+};
+
+/** Notes the extension makes itself, before or instead of asking the server. */
+const LOCAL_TEXT: Record<string, string> = {
+  network: "ForceBuy could not be reached, will retry",
+  session_invalid: "the session in the browser has an unexpected form",
+  session_expires_soon: "the session runs out too soon to be worth sending",
+  ext_rate_limited: "too many deliveries this hour, will retry",
+  invalid_request: "ForceBuy could not read the request",
+};
+
+/** A code as a sentence. A word this version does not know (an older or newer server) is neutral, never a success. */
+export function deliveryCodeText(code: string): string {
+  if (isDeliveryCode(code)) return DELIVERY_TEXT[code];
+  return LOCAL_TEXT[code] ?? "unexpected answer, see ForceBuy for details";
+}
 
 /** One line per cookie kind, from the last delivery note. Pure, so it can be tested. */
 export function describeDelivery(label: string, entry: Entry, hint: string): string {
   if (!entry) return `${label}: not sent yet`;
   if (entry.code === "missing") return `${label}: not found in this browser - ${hint}`;
-  return `${label}: sent ${new Date(entry.at).toLocaleString()} (${entry.code})`;
+  return `${label}: ${deliveryCodeText(entry.code)} (${new Date(entry.at).toLocaleString()})`;
 }
 
 /** Renewal token codes that mean ForceBuy holds a working token. */

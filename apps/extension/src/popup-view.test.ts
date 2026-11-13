@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { StatusReply } from "./background-logic";
-import { describeBuff, describeSession, noticeFor } from "./popup-view";
+import { DELIVERY_CODES, TRANSIENT_DELIVERY_CODES } from "../../../packages/shared/src/extension-delivery";
+import { deliveryCodeText, describeBuff, describeSession, noticeFor } from "./popup-view";
 
 const at = Date.parse("2026-10-23T10:00:13Z");
 
@@ -18,6 +19,28 @@ describe("describeSession", () => {
       "not found in this browser",
     );
     expect(describeSession({ renew: { steamId: "1", at, code: "renew_token_rejected" }, session: undefined })).toBe("Session: not sent yet");
+  });
+});
+
+describe("deliveryCodeText", () => {
+  it("has a sentence for every delivery code, without a dash", () => {
+    for (const code of DELIVERY_CODES) {
+      const text = deliveryCodeText(code);
+      expect(text, code).not.toBe("");
+      expect(text, code).not.toMatch(/[–—]/);
+      expect(text, code).not.toBe("unexpected answer, see ForceBuy for details");
+    }
+  });
+
+  it("gives the transient Steam failures one text", () => {
+    expect(new Set(TRANSIENT_DELIVERY_CODES.map(deliveryCodeText)).size).toBe(1);
+  });
+
+  it("says something neutral for a word it does not know, never a success", () => {
+    for (const code of ["made_up_code", "http_502"]) {
+      expect(deliveryCodeText(code)).toBe("unexpected answer, see ForceBuy for details");
+    }
+    expect(deliveryCodeText("network")).toContain("could not be reached");
   });
 });
 
@@ -57,7 +80,7 @@ describe("describeBuff", () => {
   it("says nothing was sent yet, or when it was", () => {
     expect(describeBuff(status({})).text).toBe("Buff163: not sent yet");
     const sent = describeBuff(status({ lastSent: { buff: { steamId: "", at, code: "stored" } } }));
-    expect(sent.text).toMatch(/^Buff163: sent .* \(stored\)$/);
+    expect(sent.text).toMatch(/^Buff163: stored in ForceBuy \(.*\)$/);
     expect(sent.allow).toBe(false);
   });
 
